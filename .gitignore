@@ -13,6 +13,7 @@ pids
 
 # Env
 .env
+apps/bot/serviceAccountKey.json
 
 # Dist
 dist
@@ -53,3 +54,4 @@ bun.lockb
 .prettiercache
 .eslintcache
 .vercel
+apps/bot/serviceAccountKey.json
