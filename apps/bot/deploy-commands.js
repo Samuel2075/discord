@@ -9,6 +9,10 @@ const commands = [
     {
         name: 'evento',
         description: 'Comando para gerenciar, iniciar ou participar de um evento'
+    },
+    {
+        name: 'loja',
+        description: 'Comando para gerenciar a loja'
     }
 ];
 
