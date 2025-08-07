@@ -6,26 +6,19 @@ let user;
 let eventosSnap;
 
 let opcoesMenus = {
-    evento: [
-        {
-            ADICIONAR_EXCLUIR_EVENTO: '1',
-            INICIAR_EVENTO: '2',
-            PARTICIPAR_EVENTO: '3',
-            LISTAR_EVENTOS: '4'
-        }
-    ],
-    eventoSubmenu: [
-        {
-            ADICIONAR_EVENTO: '1',
-            EXCLUIR_EVENTO: '2'
-        }
-    ],
-    loja: [
-        {
-            ADICIONAR_EVENTO: '1',
-
-        }
-    ]
+    evento: {
+        ADICIONAR_EXCLUIR_EVENTO: '1',
+        INICIAR_EVENTO: '2',
+        PARTICIPAR_EVENTO: '3',
+        LISTAR_EVENTOS: '4'
+    },
+    eventoSubmenu: {
+        ADICIONAR_EVENTO: '1',
+        EXCLUIR_EVENTO: '2'
+    },
+    loja: {
+        ADICIONAR_EVENTO: '1'
+    }
 }
 
 const client = new Client({
@@ -168,7 +161,7 @@ async function adicionarExcluirEventos(dm, filter) {
 }
 
 async function iniciarEvento(dm, filter) {
-    eventosSnap = await db.collection('eventos').get();
+    const eventosSnap = await db.collection('eventos').get();
     if (eventosSnap.empty) {
         await dm.send("⚠️ Nenhum evento cadastrado.");
     } else {
@@ -178,14 +171,18 @@ async function iniciarEvento(dm, filter) {
 
         eventosSnap.forEach(doc => {
             const data = doc.data();
-            eventos.push({ id: doc.id, nome: data.nome, pontos: data.pontos });
+            eventos.push({
+                id: doc.id,
+                nome: data.nome,
+                pontos: data.pontos
+            });
             lista += `${index} - ${data.nome}\n`;
             index++;
         });
 
         await dm.send("📋 Qual evento deseja iniciar?\n" + lista);
 
-        let eventoEscolhido = null;
+        let eventoEscolhido = false;
         while (!eventoEscolhido) {
             const res = await dm.awaitMessages({ filter, max: 1, time: 60000 });
             if (!res.size) return dm.send("⏰ Tempo esgotado.");
@@ -195,24 +192,17 @@ async function iniciarEvento(dm, filter) {
                 await dm.send("❗ Número inválido. Tente novamente.");
             } else {
                 const evento = eventos[num - 1];
+                await db.collection('eventos').doc(evento.id).update({
+                    emExecucao: true
+                });
+
                 await dm.send(`✅ Evento iniciado:\n**Nome:** ${evento.nome}\n**Pontos:** ${evento.pontos} pts`);
-                if (evento.tipo == 2) {
-                    await dm.send("💯 1 - Iniciar evento\n2 - Cancelar");
-                    const respostaEvento = await coletarResposta(dm, filter, /^\d+$/, "❗ Só números. Tente novamente.");
-                    if (respostaEvento == 1) {
-                        for (let index = 0; index < evento.numeroRodadas; index++) {
-                            setTimeout(() => {
-                                console.log("⏰ Passaram-se 10 segundos!");
-                            }, 10000);
-                            //evento em andamento   
-                        }
-                    }
-                }
                 eventoEscolhido = true;
             }
         }
     }
 }
+
 
 async function participarEvento(dm, filter) {
     try {
@@ -307,19 +297,18 @@ async function evento(interaction, dm, filter) {
                 escolha = res.first().content.trim();
                 if (!['1', '2', '3', '4'].includes(escolha)) await dm.send("❗ Opção inválida, digite 1, 2, 3 ou 4.");
             } while (!['1', '2', '3', '4'].includes(escolha));
-
             switch (escolha) {
                 case opcoesMenus.evento.ADICIONAR_EXCLUIR_EVENTO:
-                    adicionarExcluirEventos(dm, filter);
+                    await adicionarExcluirEventos(dm, filter);
                     break;
                 case opcoesMenus.evento.INICIAR_EVENTO:
-                    iniciarEvento(dm, filter);
+                    await iniciarEvento(dm, filter);
                     break;
                 case opcoesMenus.evento.PARTICIPAR_EVENTO:
-                    participarEvento(dm, filter);
+                    await participarEvento(dm, filter);
                     break;
                 case opcoesMenus.evento.LISTAR_EVENTOS:
-                    listarEventos(dm);
+                    await listarEventos(dm);
                     break;
                 default:
                     break;
@@ -328,6 +317,7 @@ async function evento(interaction, dm, filter) {
             if (["1", "2", "3", "4"].includes(escolha)) {
                 let repetir;
                 do {
+                    await dm.send("\n ---");
                     await dm.send("❓ Deseja fazer mais alguma coisa?\n1 - Sim\n2 - Encerrar");
                     const res = await dm.awaitMessages({ filter, max: 1, time: 60000 });
                     if (!res.size) return dm.send("⏰ Tempo esgotado.");
