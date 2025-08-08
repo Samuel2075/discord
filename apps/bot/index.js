@@ -1,74 +1,44 @@
-require('dotenv').config();
-const { Client, GatewayIntentBits, Partials } = require('discord.js');
-const db = require('./firebase');
-const fs = require('fs');
-let user;
-let eventosSnap;
+let self = {};
 
-let opcoesMenus = {
-    evento: {
-        ADICIONAR_EXCLUIR_EVENTO: '1',
-        INICIAR_EVENTO: '2',
-        PARTICIPAR_EVENTO: '3',
-        LISTAR_EVENTOS: '4'
-    },
-    eventoSubmenu: {
-        ADICIONAR_EVENTO: '1',
-        EXCLUIR_EVENTO: '2'
-    },
-    loja: {
-        ADICIONAR_EVENTO: '1'
-    }
-}
+self.LoadReferences = () => {
+    require('dotenv').config();
+    const { Client, GatewayIntentBits, Partials } = require('discord.js');
+    self.db = require('./firebase');
+    self.fs = require('fs');
+    self.client = new Client({
+        intents: [
+            GatewayIntentBits.Guilds,
+            GatewayIntentBits.DirectMessages,
+            GatewayIntentBits.GuildMessages,
+            GatewayIntentBits.MessageContent
+        ],
+        partials: [Partials.Channel]
+    });
 
-const client = new Client({
-    intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.DirectMessages,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent
-    ],
-    partials: [Partials.Channel]
-});
+    self.opcoesMenus = {
+        evento: {
+            ADICIONAR_EXCLUIR_EVENTO: '1',
+            INICIAR_EVENTO: '2',
+            PARTICIPAR_EVENTO: '3',
+            LISTAR_EVENTOS: '4'
+        }
+    };
 
-client.once('ready', () => {
-    console.log(`🤖 Bot conectado como ${client.user.tag}`);
-});
+    self.perguntas = [
+        { texto: "💼 Qual é seu Nick?", validar: null },
+        {
+            texto: "⚔️ Qual sua classe principal?\n1 - Kina\n2 - Magic\n3 - Pala\n4 - Upo todas por igual",
+            validar: /^[1-4]$/
+        },
+        { texto: "🪓 Qual seu nível de melee?", validar: /^\d+$/ },
+        { texto: "🌹 Qual seu nível de ataque à distância?", validar: /^\d+$/ },
+        { texto: "✨ Qual seu nível de magia?", validar: /^\d+$/ },
+        { texto: "🛡️ Qual seu nível de defesa?", validar: /^\d+$/ },
+        { texto: "🔢 Qual seu level total?", validar: /^\d+$/ }
+    ];
+};
 
-const perguntas = [
-    { texto: "💼 Qual é seu Nick?", validar: null },
-    {
-        texto: "⚔️ Qual sua classe principal?\n1 - Kina\n2 - Magic\n3 - Pala\n4 - Upo todas por igual",
-        validar: /^[1-4]$/
-    },
-    { texto: "🪓 Qual seu nível de melee?", validar: /^\d+$/ },
-    { texto: "🌹 Qual seu nível de ataque à distância?", validar: /^\d+$/ },
-    { texto: "✨ Qual seu nível de magia?", validar: /^\d+$/ },
-    { texto: "🛡️ Qual seu nível de defesa?", validar: /^\d+$/ },
-    { texto: "🔢 Qual seu level total?", validar: /^\d+$/ }
-];
-
-client.on('interactionCreate', async interaction => {
-    if (!interaction.isChatInputCommand()) return;
-
-    user = interaction.user;
-    const dm = await user.createDM();
-    const filter = m => m.author.id === user.id;
-
-    if (interaction.commandName === 'recrutar') {
-        recrutar(interaction, dm, filter, user);
-    }
-
-    if (interaction.commandName === 'evento') {
-        evento(interaction, dm, filter, user);
-    }
-
-    if (interaction.commandName === 'loja') {
-        loja(interaction, dm, filter, user);
-    }
-});
-
-async function coletarResposta(dmChannel, filter, regex = null, mensagemErro = null) {
+self.coletarResposta = async (dmChannel, filter, regex = null, mensagemErro = null) => {
     while (true) {
         const coletada = await dmChannel.awaitMessages({ filter, max: 1, time: 60000 });
         if (!coletada.size) throw new Error("Tempo esgotado");
@@ -79,11 +49,11 @@ async function coletarResposta(dmChannel, filter, regex = null, mensagemErro = n
             return resposta;
         }
     }
-}
+};
 
-async function salvarNoFirebase(userId, respostas) {
+self.SalvarNoFirebase = async (userId, respostas) => {
     try {
-        await db.collection('usuarios').doc(userId).set({
+        await self.db.collection('usuarios').doc(userId).set({
             nick: respostas[0], classe: respostas[1], melee: respostas[2], distancia: respostas[3],
             magia: respostas[4], defesa: respostas[5], level: respostas[6], pontos: 0, data: new Date().toISOString()
         });
@@ -91,9 +61,39 @@ async function salvarNoFirebase(userId, respostas) {
     } catch (err) {
         console.error("🔥 Erro ao salvar no Firebase:", err);
     }
-}
+};
 
-async function adicionarExcluirEventos(dm, filter) {
+self.LoadEvents = () => {
+    self.client.on('interactionCreate', async interaction => {
+        if (!interaction.isChatInputCommand()) return;
+        self.user = interaction.user;
+        self.dm = await self.user.createDM();
+        const filter = m => m.author.id === self.user.id;
+
+        if (interaction.commandName === 'recrutar') {
+            await self.Recrutar(interaction, filter);
+        }
+        if (interaction.commandName === 'evento') {
+            await self.Evento(interaction, self.dm, filter);
+        }
+        if (interaction.commandName === 'loja') {
+            const userDoc = await self.db.collection('usuarios').doc(self.user.id).get();
+            if (!userDoc.exists) {
+                await self.dm.send("⚠️ Você precisa preencher o formulário de entrada primeiro usando /recrutar.");
+                await interaction.reply({ content: "Preencha o formulário de entrada usando /recrutar primeiro!", ephemeral: true });
+                return;
+            }
+            const userData = userDoc.data();
+            await self.Loja(interaction, self.dm, filter, userData);
+        }
+    });
+
+    self.client.once('ready', () => {
+        console.log(`🤖 Bot conectado como ${self.client.user.tag}`);
+    });
+};
+
+self.AdicionarExcluirEventos = async (dm, filter) => {
     let subopcao;
     do {
         await dm.send("📋 O que deseja fazer?\n1 - Adicionar evento\n2 - Excluir evento");
@@ -105,10 +105,10 @@ async function adicionarExcluirEventos(dm, filter) {
 
     if (subopcao === "1") {
         await dm.send("📝 Digite o nome do evento:");
-        const nome = await coletarResposta(dm, filter);
+        const nome = await self.coletarResposta(dm, filter);
 
         await dm.send("💯 Digite os pontos do evento:");
-        const pontos = await coletarResposta(dm, filter, /^\d+$/, "❗ Só números. Tente novamente.");
+        const pontos = await self.coletarResposta(dm, filter, /^\d+$/, "❗ Só números. Tente novamente.");
 
         await dm.send(
             "❓ Qual tipo de evento é?\n" +
@@ -117,17 +117,17 @@ async function adicionarExcluirEventos(dm, filter) {
             "3 - Portas\n" +
             "4 - Customizado (Ainda em desenvolvimento)"
         );
-        const tipoEvento = await coletarResposta(dm, filter, /^\d+$/, "❗ Só números. Tente novamente.");
+        const tipoEvento = await self.coletarResposta(dm, filter, /^\d+$/, "❗ Só números. Tente novamente.");
 
-        await dm.send("💯 Digite o numero de rodadas:");
-        const numeroRodadas = await coletarResposta(dm, filter, /^\d+$/, "❗ Só números. Tente novamente.");
+        await dm.send("💯 Digite o número de rodadas:");
+        const numeroRodadas = await self.coletarResposta(dm, filter, /^\d+$/, "❗ Só números. Tente novamente.");
 
-        await db.collection('eventos').add({ nome, pontos: parseInt(pontos), tipo: parseInt(tipoEvento), emExecucao: false, jogadores: [], numeroRodadas: numeroRodadas, criadoEm: new Date().toISOString() });
+        await self.db.collection('eventos').add({ nome, pontos: parseInt(pontos), tipo: parseInt(tipoEvento), emExecucao: false, jogadores: [], numeroRodadas: parseInt(numeroRodadas), criadoEm: new Date().toISOString() });
         await dm.send(`✅ Evento "${nome}" adicionado com ${pontos} pontos.`);
     }
 
     if (subopcao === "2") {
-        eventosSnap = await db.collection('eventos').get();
+        const eventosSnap = await self.db.collection('eventos').get();
         if (eventosSnap.empty) {
             await dm.send("⚠️ Nenhum evento cadastrado.");
         } else {
@@ -151,17 +151,17 @@ async function adicionarExcluirEventos(dm, filter) {
                 if (isNaN(num) || num < 1 || num > eventos.length) {
                     await dm.send("❗ Número inválido. Tente novamente.");
                 } else {
-                    await db.collection('eventos').doc(eventos[num - 1].id).delete();
+                    await self.db.collection('eventos').doc(eventos[num - 1].id).delete();
                     await dm.send(`🗑️ Evento "${eventos[num - 1].nome}" excluído com sucesso.`);
                     valido = true;
                 }
             }
         }
     }
-}
+};
 
-async function iniciarEvento(dm, filter) {
-    const eventosSnap = await db.collection('eventos').get();
+self.IniciarEvento = async (dm, filter) => {
+    const eventosSnap = await self.db.collection('eventos').get();
     if (eventosSnap.empty) {
         await dm.send("⚠️ Nenhum evento cadastrado.");
     } else {
@@ -171,11 +171,7 @@ async function iniciarEvento(dm, filter) {
 
         eventosSnap.forEach(doc => {
             const data = doc.data();
-            eventos.push({
-                id: doc.id,
-                nome: data.nome,
-                pontos: data.pontos
-            });
+            eventos.push({ id: doc.id, nome: data.nome, pontos: data.pontos });
             lista += `${index} - ${data.nome}\n`;
             index++;
         });
@@ -192,21 +188,17 @@ async function iniciarEvento(dm, filter) {
                 await dm.send("❗ Número inválido. Tente novamente.");
             } else {
                 const evento = eventos[num - 1];
-                await db.collection('eventos').doc(evento.id).update({
-                    emExecucao: true
-                });
-
+                await self.db.collection('eventos').doc(evento.id).update({ emExecucao: true });
                 await dm.send(`✅ Evento iniciado:\n**Nome:** ${evento.nome}\n**Pontos:** ${evento.pontos} pts`);
                 eventoEscolhido = true;
             }
         }
     }
-}
+};
 
-
-async function participarEvento(dm, filter) {
+self.ParticiparEvento = async (dm, filter) => {
     try {
-        const userDoc = await db.collection('usuarios').doc(user.id).get();
+        const userDoc = await self.db.collection('usuarios').doc(self.user.id).get();
 
         if (!userDoc.exists) {
             await dm.send("⚠️ Você ainda não preencheu o formulário de entrada.");
@@ -214,20 +206,24 @@ async function participarEvento(dm, filter) {
         }
 
         const dados = userDoc.data();
-        await dm.send(`🧾 Seus dados de participante:\n🆔 ID: ${user.id}\n📛 Nick: ${dados.nick}`);
+        await dm.send(`🧾 Seus dados de participante:\n🆔 ID: ${self.user.id}\n📛 Nick: ${dados.nick}`);
 
-        // Aguarda até encontrar um evento com emExecucao = true
-        let querySnapshot;
         let tentativas = 0;
         const maxTentativas = 30;
+        let eventosExecucao = [];
 
         do {
-            querySnapshot = await db.collection('eventos')
+            const querySnapshot = await self.db.collection('eventos')
                 .where('emExecucao', '==', true)
-                .limit(1)
                 .get();
 
-            if (querySnapshot.empty) {
+            eventosExecucao = [];
+            querySnapshot.forEach(doc => {
+                const data = doc.data();
+                eventosExecucao.push({ id: doc.id, nome: data.nome, pontos: data.pontos, jogadores: data.jogadores || [] });
+            });
+
+            if (eventosExecucao.length === 0) {
                 tentativas++;
                 if (tentativas >= maxTentativas) {
                     await dm.send("⚠️ Nenhum evento em execução foi encontrado após várias tentativas.");
@@ -235,41 +231,61 @@ async function participarEvento(dm, filter) {
                 }
                 await new Promise(resolve => setTimeout(resolve, 1000)); // espera 1 segundo
             }
-        } while (querySnapshot.empty);
+        } while (eventosExecucao.length === 0);
 
-        const eventoDoc = querySnapshot.docs[0];
-        const evento = eventoDoc.data();
-        evento.jogadores.push(dados);
-        await dm.send(`▶️ Evento em execução: ${evento.nome}\n💯 Pontos: ${evento.pontos}`);
-        let dadoRolado = false;
-        let primeiraIteração = true;
-        setTimeout(async () => {
-            if (primeiraIteração == false && dadoRolado == false) {
-                console.error("❌ Erro ao buscar dados do usuário:");
+        // Mostra lista para escolha
+        let lista = "";
+        for (let i = 0; i < eventosExecucao.length; i++) {
+            lista += `${i + 1} - ${eventosExecucao[i].nome} (${eventosExecucao[i].pontos} pts)\n`;
+        }
+        await dm.send("📋 Eventos em execução:\n" + lista);
+
+        // Usuário escolhe o evento
+        let eventoEscolhido = null;
+        while (!eventoEscolhido) {
+            await dm.send("Digite o número do evento em que deseja participar:");
+            const res = await dm.awaitMessages({ filter, max: 1, time: 60000 });
+            if (!res.size) return dm.send("⏰ Tempo esgotado.");
+
+            const num = parseInt(res.first().content.trim());
+            if (isNaN(num) || num < 1 || num > eventosExecucao.length) {
+                await dm.send("❗ Número inválido. Tente novamente.");
+            } else {
+                eventoEscolhido = eventosExecucao[num - 1];
             }
-        }, 1000);
-        await dm.send(
-            "❓ Escolha uma opção?\n" +
-            "1 - Rolar dado"
-        );
-        const rolarDado = await coletarResposta(dm, filter, /^1$/, "❗ Digite apenas o número 1.");
+        }
+
+        // Registrar o jogador nesse evento (adiciona aos jogadores)
+       const refEvento = self.db.collection('eventos').doc(eventoEscolhido.id);
+
+        // Verifica se já está no evento pelo ID do usuário
+        const jaParticipa = (eventoEscolhido.jogadores || []).some(j => j && j.nick === dados.nick && j.level === dados.level && j.classe === dados.classe && j.melee === dados.melee); // pode ajustar os campos se quiser só por id
+
+        if (jaParticipa) {
+            await dm.send("⚠️ Você já está participando deste evento!");
+            return;
+        }
+
+        // Adiciona o usuário
+        await refEvento.update({
+            jogadores: [...(eventoEscolhido.jogadores || []), dados]
+        });
+
+        await dm.send(`▶️ Evento em execução: ${eventoEscolhido.nome}\n💯 Pontos: ${eventoEscolhido.pontos}`);
+        await dm.send("❓ Escolha uma opção?\n1 - Rolar dado");
+        await self.coletarResposta(dm, filter, /^1$/, "❗ Digite apenas o número 1.");
         const resultado = Math.floor(Math.random() * 20) + 1;
         await dm.send(`🎲 Você rolou o dado... Resultado: **${resultado}**!`);
-        const jogada = {
-            jogador: dados,
-            resultado: resultado
-        }
-        // evento.jogadas.push(jogada);
-        dadoRolado = true;
 
     } catch (error) {
         console.error("❌ Erro ao buscar dados do usuário:", error);
         await dm.send("❌ Erro ao buscar seus dados. Tente novamente mais tarde.");
     }
-}
+};
 
-async function listarEventos(dm) {
-    eventosSnap = await db.collection('eventos').get();
+
+self.ListarEventos = async (dm) => {
+    const eventosSnap = await self.db.collection('eventos').get();
     if (eventosSnap.empty) {
         await dm.send("⚠️ Nenhum evento cadastrado.");
     } else {
@@ -281,9 +297,9 @@ async function listarEventos(dm) {
         });
         await dm.send("📋 Eventos cadastrados:\n" + lista);
     }
-}
+};
 
-async function evento(interaction, dm, filter) {
+self.Evento = async (interaction, dm, filter) => {
     await interaction.deferReply({ ephemeral: true });
 
     try {
@@ -298,17 +314,17 @@ async function evento(interaction, dm, filter) {
                 if (!['1', '2', '3', '4'].includes(escolha)) await dm.send("❗ Opção inválida, digite 1, 2, 3 ou 4.");
             } while (!['1', '2', '3', '4'].includes(escolha));
             switch (escolha) {
-                case opcoesMenus.evento.ADICIONAR_EXCLUIR_EVENTO:
-                    await adicionarExcluirEventos(dm, filter);
+                case self.opcoesMenus.evento.ADICIONAR_EXCLUIR_EVENTO:
+                    await self.AdicionarExcluirEventos(dm, filter);
                     break;
-                case opcoesMenus.evento.INICIAR_EVENTO:
-                    await iniciarEvento(dm, filter);
+                case self.opcoesMenus.evento.INICIAR_EVENTO:
+                    await self.IniciarEvento(dm, filter);
                     break;
-                case opcoesMenus.evento.PARTICIPAR_EVENTO:
-                    await participarEvento(dm, filter);
+                case self.opcoesMenus.evento.PARTICIPAR_EVENTO:
+                    await self.ParticiparEvento(dm, filter);
                     break;
-                case opcoesMenus.evento.LISTAR_EVENTOS:
-                    await listarEventos(dm);
+                case self.opcoesMenus.evento.LISTAR_EVENTOS:
+                    await self.ListarEventos(dm);
                     break;
                 default:
                     break;
@@ -317,7 +333,6 @@ async function evento(interaction, dm, filter) {
             if (["1", "2", "3", "4"].includes(escolha)) {
                 let repetir;
                 do {
-                    await dm.send("\n ---");
                     await dm.send("❓ Deseja fazer mais alguma coisa?\n1 - Sim\n2 - Encerrar");
                     const res = await dm.awaitMessages({ filter, max: 1, time: 60000 });
                     if (!res.size) return dm.send("⏰ Tempo esgotado.");
@@ -337,31 +352,31 @@ async function evento(interaction, dm, filter) {
         console.error("❌ Erro no comando /evento:", err);
         await interaction.editReply({ content: '❌ Erro ao executar o comando. Verifique se você está com DMs abertas.' });
     }
-}
+};
 
-async function recrutar(interaction, dm, filter, user) {
+self.Recrutar = async (interaction, filter) => {
     await interaction.deferReply({ ephemeral: true });
 
     try {
-        await dm.send("👋 Olá! Vamos preencher seu formulário de entrada:");
-        const respostas = {};
+        await self.dm.send("👋 Olá! Vamos preencher seu formulário de entrada:");
+        const respostas = [];
 
-        for (let i = 0; i < perguntas.length; i++) {
+        for (let i = 0; i < self.perguntas.length; i++) {
             let respostaValida = false;
 
             while (!respostaValida) {
-                await dm.send(perguntas[i].texto);
-                const coletada = await dm.awaitMessages({ filter, max: 1, time: 60000 });
+                await self.dm.send(self.perguntas[i].texto);
+                const respostaColetada = await self.dm.awaitMessages({ filter, max: 1, time: 60000 });
 
-                if (!coletada.size) {
-                    await dm.send("⏰ Tempo esgotado. Tente novamente mais tarde.");
+                if (!respostaColetada.size) {
+                    await self.dm.send("⏰ Tempo esgotado. Tente novamente mais tarde.");
                     await interaction.editReply({ content: '❌ Formulário cancelado por inatividade.' });
                     return;
                 }
 
-                const resposta = coletada.first().content.trim();
-                if (perguntas[i].validar && !perguntas[i].validar.test(resposta)) {
-                    await dm.send(i === 1 ? "❗ Opção errada, tente novamente. Digite um número de 1 a 4." : "❗ Esse campo só aceita números, favor digitar novamente.");
+                const resposta = respostaColetada.first().content.trim();
+                if (self.perguntas[i].validar && !self.perguntas[i].validar.test(resposta)) {
+                    await self.dm.send(i === 1 ? "❗ Opção errada, tente novamente. Digite um número de 1 a 4." : "❗ Esse campo só aceita números, favor digitar novamente.");
                 } else {
                     respostas[i] = resposta;
                     respostaValida = true;
@@ -369,16 +384,18 @@ async function recrutar(interaction, dm, filter, user) {
             }
         }
 
-        await salvarNoFirebase(user.id, respostas);
-        await dm.send("✅ Formulário recebido com sucesso! Bem-vindo à guilda.");
+        await self.SalvarNoFirebase(self.user.id, respostas);
+        await self.dm.send("✅ Formulário recebido com sucesso! Bem-vindo à guilda.");
         await interaction.editReply({ content: '📩 Formulário preenchido com sucesso via DM!' });
     } catch (err) {
         console.error("❌ Erro ao iniciar formulário:", err);
         await interaction.editReply({ content: '❌ Não consegui enviar sua DM. Verifique se você está com DMs abertas.' });
     }
-}
+};
 
-async function loja(interaction, dm, filter, user) {
+// --------- LOJA -----------
+
+self.Loja = async (interaction, dm, filter, user) => {
     await interaction.deferReply({ ephemeral: true });
 
     try {
@@ -394,37 +411,37 @@ async function loja(interaction, dm, filter, user) {
                 "Digite o número da opção desejada:"
             );
 
-            const escolha = await coletarResposta(dm, filter, /^[1-4]$/, "❗ Opção inválida. Escolha um número de 1 a 4.");
+            const escolha = await self.coletarResposta(dm, filter, /^[1-4]$/, "❗ Opção inválida. Escolha um número de 1 a 4.");
 
             if (escolha === "1") {
                 await dm.send("📝 Digite o nome do item:");
-                const nome = await coletarResposta(dm, filter);
+                const nome = await self.coletarResposta(dm, filter);
 
                 await dm.send("💯 Digite os pontos do item:");
-                const pontos = await coletarResposta(dm, filter, /^\d+$/, "❗ Só números. Tente novamente.");
+                const pontos = await self.coletarResposta(dm, filter, /^\d+$/, "❗ Só números. Tente novamente.");
 
-                await db.collection('itensLoja').doc(nome).set({ nome, pontos: parseInt(pontos) });
+                await self.db.collection('itensLoja').doc(nome).set({ nome, pontos: parseInt(pontos) });
                 await dm.send(`✅ Item **${nome}** cadastrado com sucesso com **${pontos}** pontos.`);
             }
 
             if (escolha === "2") {
                 await dm.send("🗑️ Digite o nome do item que deseja excluir:");
-                const nome = await coletarResposta(dm, filter);
-                await db.collection('itensLoja').doc(nome).delete();
+                const nome = await self.coletarResposta(dm, filter);
+                await self.db.collection('itensLoja').doc(nome).delete();
                 await dm.send(`🗑️ Item **${nome}** excluído com sucesso.`);
             }
 
             if (escolha === "3") {
                 await dm.send("⏳ Iniciando cadastro em lote...");
-                const rawData = fs.readFileSync('loadStore.json');
+                const rawData = self.fs.readFileSync('loadStore.json');
                 const jsonData = JSON.parse(rawData);
                 const items = jsonData.content;
 
                 if (!Array.isArray(items)) throw new Error("O JSON não possui um array chamado 'content'.");
 
-                const batch = db.batch();
+                const batch = self.db.batch();
                 items.forEach(item => {
-                    const ref = db.collection('itensLoja').doc(item.nome);
+                    const ref = self.db.collection('itensLoja').doc(item.nome);
                     batch.set(ref, item);
                 });
 
@@ -433,7 +450,7 @@ async function loja(interaction, dm, filter, user) {
             }
 
             if (escolha === "4") {
-                const snapshot = await db.collection('itensLoja').get();
+                const snapshot = await self.db.collection('itensLoja').get();
 
                 if (snapshot.empty) {
                     await dm.send("📭 Nenhum item cadastrado.");
@@ -441,10 +458,10 @@ async function loja(interaction, dm, filter, user) {
                     const items = [];
                     snapshot.forEach(doc => {
                         const data = doc.data();
-                        items.push(`• ${data.nick} — ${data.pontos} pontos`);
+                        items.push(`• ${data.nome} — ${data.pontos} pontos`);
                     });
 
-                    // Envia em blocos de até 1900 caracteres para evitar corte
+                    // Envia em blocos de até 1900 caracteres para evitar corte do Discord
                     let bloco = "";
                     for (const linha of items) {
                         if ((bloco + linha + '\n').length > 1900) {
@@ -458,7 +475,7 @@ async function loja(interaction, dm, filter, user) {
             }
 
             await dm.send("❓ Deseja fazer mais alguma coisa?\n1 - Sim\n2 - Encerrar");
-            const resp = await coletarResposta(dm, filter, /^[1-2]$/, "❗ Responda com 1 ou 2.");
+            const resp = await self.coletarResposta(dm, filter, /^[1-2]$/, "❗ Responda com 1 ou 2.");
             if (resp === "2") continuar = false;
         }
 
@@ -469,19 +486,15 @@ async function loja(interaction, dm, filter, user) {
         console.error("❌ Erro na função loja:", error);
         await dm.send("❌ Ocorreu um erro. Verifique o console para mais detalhes.");
     }
-}
+};
 
-async function coletarResposta(dmChannel, filter, regex = null, erro = null) {
-    while (true) {
-        const res = await dmChannel.awaitMessages({ filter, max: 1, time: 60000 });
-        if (!res.size) throw new Error("Tempo esgotado.");
-        const conteudo = res.first().content.trim();
-        if (regex && !regex.test(conteudo)) {
-            await dmChannel.send(erro || "❗ Entrada inválida. Tente novamente.");
-        } else {
-            return conteudo;
-        }
-    }
-}
+// ---------- BUILD E LOGIN ----------
 
-client.login(process.env.TOKEN);
+self.Build = () => {
+    self.LoadReferences();
+    self.LoadEvents();
+};
+
+self.Build();
+self.client.login(process.env.TOKEN);
+
